@@ -1,6 +1,5 @@
 #include <Arduino.h>
 
-
 ////////////////////////////////////////////////////////////////////////
 //
 //    Long exposure Interface
@@ -15,9 +14,8 @@
 //
 ////////////////////////////////////////////////////////////////////////
 
-// #include <EventManager.h>
 #include <LiquidCrystal.h>
-// #include <LowPower.h>
+
 
 byte upArrow[8] = {
 	0b00100,
@@ -168,6 +166,7 @@ float tempExposureSeconds=10;
 
 int stops = 10;
 int exposureindex = 19;
+
 
 //////////////////////////////////////////  Debounce Variables
 
