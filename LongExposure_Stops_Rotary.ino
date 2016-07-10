@@ -14,7 +14,46 @@
 //
 ////////////////////////////////////////////////////////////////////////
 
+//Wiring::
+//
+//	LCD = 11,12,5,4,6,7
+//  Buttons:
+//	Green = 8
+//	Red = 9
+//	Encoder = 2,3
+//	Encoder Button = 10
+//	Camera Pin = 13
+
+
+
+
 #include <LiquidCrystal.h>
+
+//Rotary Encoder Code
+
+int encoderPin1 = 2;
+int encoderPin2 = 3;
+int encoderSwitchPin = 10; //push button switch
+
+bool b_takingPicture = false;
+
+volatile int lastEncoded = 0;
+volatile long encoderValue = 0;
+
+long lastencoderValue = 0;
+
+int lastMSB = 0;
+int lastLSB = 0;
+int button = 0;
+
+
+
+
+//End Rotary Code
+
+
+
+
 
 
 byte upArrow[8] = {
@@ -196,53 +235,39 @@ String captureTime = "00:00:10";
 int cursorIndex=0;
 
 bool b_capturing=false;
+bool b_StopsOrTime = false;
+
 bool buttonPressed=true;
 
 //Init Pins for CameraCapture;
-int pinForCapture = 2;
+int pinForCapture = 13;
 
+int captureButton = 9;
+int cancelButton = 8;
 //////////////////////////////////////////  Init Pins for LCD
 
-LiquidCrystal lcd(8, 9, 4, 5, 6, 7);           // select the pins used on the LCD panel
+LiquidCrystal lcd(11, 12, 5, 4, 6, 7);           // select the pins used on the LCD panel
 
 ////////////////////////////////////////// define some values used by the panel and buttons
 int lcd_key     = 0;
 int adc_key_in  = 0;
 
-#define btnRIGHT  0
-#define btnUP     1
-#define btnDOWN   2
-#define btnLEFT   3
-#define btnSELECT 4
-#define btnNONE   5
 
 #define HOUR 3600
 #define MIN 60
 
-int read_LCD_buttons(){               // read the buttons
-    adc_key_in = analogRead(0);       // read the value from the sensor
-
-    // my buttons when read are centered at these valies: 0, 144, 329, 504, 741
-    // we add approx 50 to those values and check to see if we are close
-    // We make this the 1st option for speed reasons since it will be the most likely result
-
-		if ((millis() - lastDebounceTime) > debounceDelay)
-		{
-					lastDebounceTime = millis();
-					if (adc_key_in > 1000) return btnNONE;
-			    if (adc_key_in < 50)   return btnRIGHT;
-			    if (adc_key_in < 195)  return btnUP;
-			    if (adc_key_in < 380)  return btnDOWN;
-			    if (adc_key_in < 555)  return btnLEFT;
-			    if (adc_key_in < 790)  return btnSELECT;
-		}
-    return btnNONE;                // when all others fail, return this.
-}
 
 
 void setup() {
-	analogWrite(10,80); //Turn down backlight brightness
-	pinMode(13,OUTPUT);
+	// analogWrite(10,80); //Turn down backlight brightness
+
+	pinMode(pinForCapture,OUTPUT); //Camera Pin
+	pinMode(cancelButton,INPUT);
+	pinMode(captureButton,INPUT);
+
+	digitalWrite(cancelButton,LOW);
+	digitalWrite(captureButton,LOW);
+
 	// Serial.begin(9600);
   lcd.clear();
   lcd.begin(16, 2);
@@ -260,6 +285,25 @@ void setup() {
   pinMode(pinForCapture,OUTPUT);
   digitalWrite(pinForCapture,LOW);
 	lastDebounceTime = millis();
+
+
+	//Rotary Encoder
+	pinMode(encoderPin1, INPUT);
+  pinMode(encoderPin2, INPUT);
+
+  pinMode(encoderSwitchPin, INPUT);
+
+  digitalWrite(encoderPin1, HIGH); //turn pullup resistor on
+  digitalWrite(encoderPin2, HIGH); //turn pullup resistor on
+
+//  digitalWrite(encoderSwitchPin, LOW); //turn pullup resistor on
+
+
+  //call updateEncoder() when any high/low changed seen
+  //on interrupt 0 (pin 2), or interrupt 1 (pin 3)
+  attachInterrupt(0, updateEncoder, CHANGE);
+  attachInterrupt(1, updateEncoder, CHANGE);
+
 
 
 
@@ -282,31 +326,42 @@ void WakeUp(){
 
 void loop() {
 
-	// LowPower.idle(SLEEP_15MS, ADC_OFF, TIMER2_OFF, TIMER1_OFF, TIMER0_OFF,
-							//  SPI_OFF, USART0_OFF, TWI_OFF);
-// LowPower();
+
 
 if (!b_capturing){
-	if (!powerSaving){
-		if (millis() - PowerSaveCount > PowerSaveLength){
-			lcd.setCursor(0,0);
-			lcd.print(" ENTERING POWER ");
-			lcd.setCursor(0,1);
-			lcd.print("     SAVING     ");
-			delay(800);
-			powerSaving=true;
-			LowPower();
-		}
-	}
+	// if (!powerSaving){
+	// 	if (millis() - PowerSaveCount > PowerSaveLength){
+	// 		lcd.setCursor(0,0);
+	// 		lcd.print(" ENTERING POWER ");
+	// 		lcd.setCursor(0,1);
+	// 		lcd.print("     SAVING     ");
+	// 		delay(800);
+	// 		powerSaving=true;
+	// 		LowPower();
+	// 	}
+	// }
+
+	if(digitalRead(encoderSwitchPin)==LOW){
+    //button is being pushed
+		b_StopsOrTime = !b_StopsOrTime;
+    // button=2;
+    // b_takingPicture=true;
+  }else{
+    //button is NOT being pushed
+    // button=3;
+    // b_takingPicture=false;
+  }
+
+
   ReadButtons();
-  delay(50);
+  delay(100);
 
   if (buttonPressed){
     // printTime();
-		WakeUp();
+		// WakeUp();
 
 		PrintStops();
-		PowerSaveCount = millis();
+		// PowerSaveCount = millis();
     buttonPressed=false;
   }
 }
@@ -319,6 +374,7 @@ int lengthofStops(int stopValue){
 	else if(stopValue >= 10)
   return 1;
 }
+
 
 void PrintStops(){
 	lcd.setCursor(0,0);
@@ -344,75 +400,65 @@ void PrintStops(){
 
 
 void checkForCancel(){
-	lcd_key = read_LCD_buttons();   // read the buttons
-	switch (lcd_key){               // depending on which button was pushed, we perform an action
-			case btnLEFT:{
-				b_capturing=false;
-				break;
-			}
-		}
+	if (digitalRead(cancelButton) == HIGH){
+			b_capturing=false;
+	}
 }
 //////////////////////////////////////////  Button pressed!
 void ReadButtons(){
-  lcd_key = read_LCD_buttons();   // read the buttons
-  switch (lcd_key){               // depending on which button was pushed, we perform an action
 
-         case btnRIGHT:{             //  push button "RIGHT" and show the word on the screen
-
-              buttonPressed=true;
-              // lcd.setCursor(0,1);
-              // lcd.println("                ");
-              if (cursorIndex<1){
-                cursorIndex++;
-              }
-              // else{
-                // cursorIndex=0;
-              // }
-
-              break;
-         }
-         case btnLEFT:{
-
-              buttonPressed=true;
-              // lcd.setCursor(0,1);
-              // lcd.println("                ");
-               if (cursorIndex>0){
-                cursorIndex--;
-              }
-              // else{
-                // cursorIndex=3;
-              // }
-               break;
-         }
-         case btnUP:{
-
-              buttonPressed=true;
-               TimerUp();
-               break;
-         }
-         case btnDOWN:{
-
-              buttonPressed=true;
-               TimerDown();
-               break;
-         }
-         case btnSELECT:{
-
-               if (!b_capturing){
-                b_capturing=true;
-                TakePicture();
-               }
-               else{
-                b_capturing=false;
-               }
-               break;
-         }
-         case btnNONE:{
-
-               break;
-         }
-     }
+	if (digitalRead(captureButton)==HIGH){
+		b_capturing=true;
+		TakePicture();
+		buttonPressed=true;
+	}
 }
+
+
+
+
+void updateEncoder(){ //Update the encoder Turns
+  if (!b_capturing)
+  {
+    int MSB = digitalRead(encoderPin1); //MSB = most significant bit
+    int LSB = digitalRead(encoderPin2); //LSB = least significant bit
+
+    int encoded = (MSB << 1) |LSB; //converting the 2 pin value to single number
+    int sum  = (lastEncoded << 2) | encoded; //adding it to the previous encoded value
+
+    if(sum == 0b1011) {
+			if (b_StopsOrTime){
+				// encoderValue ++;
+				cursorIndex++;
+			}
+			else {
+				TimerUp();
+			}
+			//Add the code to update either the Stops or the Capture
+		}
+    if(sum == 0b1000) {
+			if (b_StopsOrTime){
+				// encoderValue --;
+				cursorIndex--;
+			}
+			else {
+				TimerDown();
+			}
+			//Add the code to update either the Stops or the Capture
+
+		}
+
+//    if(sum == 0b1101 || sum == 0b0100 || sum == 0b0010 || sum == 0b1011) encoderValue ++;
+//    if(sum == 0b1110 || sum == 0b0111 || sum == 0b0001 || sum == 0b1000) encoderValue --;
+
+
+    lastEncoded = encoded; //store this value for next time
+  }
+}
+
+
+
+
 
 //////////////////////////////////////////  Timer Up
 
